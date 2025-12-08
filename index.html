@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <title>LC-MS/MS Kalibrasyon Hesaplayıcı</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 40px;
+            max-width: 500px;
+        }
+        input {
+            width: 100%;
+            padding: 8px;
+            margin: 6px 0;
+        }
+        button {
+            padding: 10px;
+            width: 100%;
+            cursor: pointer;
+        }
+        .result {
+            margin-top: 20px;
+            font-weight: bold;
+            background: #f2f2f2;
+            padding: 10px;
+        }
+    </style>
+</head>
+<body>
+
+<h2>LC-MS/MS Kalibrasyon Hesaplama</h2>
+
+<label>Slope (m):</label>
+<input type="number" id="slope" step="0.0000001">
+
+<label>Intercept (b):</label>
+<input type="number" id="intercept" step="0.0000001">
+
+<label>Peak Area Ratio:</label>
+<input type="number" id="ratio" step="0.0000001">
+
+<button onclick="calculate()">Hesapla</button>
+
+<div class="result" id="output"></div>
+
+<script>
+function calculate() {
+    const m = parseFloat(document.getElementById("slope").value);
+    const b = parseFloat(document.getElementById("intercept").value);
+    const r = parseFloat(document.getElementById("ratio").value);
+
+    if (isNaN(m) || isNaN(b) || isNaN(r)) {
+        document.getElementById("output").innerHTML = "Lütfen tüm değerleri gir.";
+        return;
+    }
+
+    const conc = (r - b) / m;
+    document.getElementById("output").innerHTML = "Konsantrasyon: " + conc.toFixed(4);
+}
+</script>
+
+</body>
+</html>
