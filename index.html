@@ -4,18 +4,20 @@
     <meta charset="UTF-8">
     <title>LC-MS/MS Kalibrasyon Hesaplayıcı</title>
     <style>
-        body { font-family: Arial, sans-serif; margin: 40px; max-width: 600px; }
+        body { font-family: Arial, sans-serif; margin: 40px; max-width: 700px; }
         input, select { width: 100%; padding: 8px; margin: 6px 0; }
         button { padding: 10px; width: 100%; cursor: pointer; }
         .result { margin-top: 20px; font-weight: bold; background: #f2f2f2; padding: 10px; }
+        .chem-img { width: 180px; margin: 15px 0; }
+        .eq-box { background:#eef; padding:10px; border-radius:8px; margin-top:15px; }
     </style>
 </head>
 <body>
 <h2>LC-MS/MS Kalibrasyon Hesaplayıcı</h2>
-<p>Kimyasal seç → area gir → kalibrasyona göre konsantrasyon hesapla.</p>
+<p>Kimyasal seç → area gir → regresyon denklemine göre konsantrasyon hesapla.</p>
 
 <label>Kimyasal:</label>
-<select id="chem">
+<select id="chem" onchange="updateChem()">
     <option value="didecyl">Didecyldimethyl ammonium-1</option>
     <option value="hexpyr">Hexadecylpyridinium-1</option>
     <option value="hextri">Hexadecyltrimethyl ammonium-1</option>
@@ -24,6 +26,8 @@
     <option value="benz16">Benzyldimethylhexadecylammonium-1</option>
 </select>
 
+<div id="chemDisplay"></div>
+
 <label>Area:</label>
 <input type="number" id="area" step="0.0001">
 
@@ -31,17 +35,30 @@
 <div class="result" id="output"></div>
 
 <script>
-// --- Buraya her bir kimyasal için regresyon denklemlerini ekle ---
-// Form: conc = (area - intercept) / slope
-
+// --- Regresyon değerleri (örnek, gerçek değerler hesaplanınca buraya yazılacak) ---
 const models = {
-    didecyl:      { m: 7453.7, b: 1100 },
-    hexpyr:       { m: 2800.4, b: 800 },
-    hextri:       { m: 2600.2, b: 2100 },
-    benz12:       { m: 20000,  b: 5500 },
-    benz14:       { m: 9500,   b: 2000 },
-    benz16:       { m: 8200,   b: 600  }
+    didecyl: { m: 7453.7, b: 1100, r2: 0.996, img:"https://i.imgur.com/Qx7mYxC.png" },
+    hexpyr:  { m: 2800.4, b: 800,  r2: 0.995, img:"https://i.imgur.com/Bq3N5Zz.png" },
+    hextri:  { m: 2600.2, b: 2100, r2: 0.994, img:"https://i.imgur.com/Z8k4GiC.png" },
+    benz12:  { m: 20000, b: 5500, r2: 0.997, img:"https://i.imgur.com/7oIVB6C.png" },
+    benz14:  { m: 9500,  b: 2000, r2: 0.996, img:"https://i.imgur.com/jv1UcYV.png" },
+    benz16:  { m: 8200,  b: 600,  r2: 0.995, img:"https://i.imgur.com/YsvAZr9.png" }
 };
+
+function updateChem() {
+    const chem = document.getElementById("chem").value;
+    const model = models[chem];
+    document.getElementById("chemDisplay").innerHTML = `
+        <img src="${model.img}" class="chem-img">
+        <div class='eq-box'>
+            <b>Regresyon Denklemi:</b><br>
+            area = ${model.m} × conc + ${model.b}<br><br>
+            <b>R² = ${model.r2}</b>
+        </div>
+    `;
+}
+
+updateChem();
 
 function calculate() {
     const chem = document.getElementById("chem").value;
