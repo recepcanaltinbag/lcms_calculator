@@ -1,79 +1,61 @@
-<!DOCTYPE html>
-<html lang="tr">
+<!doctype html>
+<html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>LC-MS/MS Kalibrasyon Hesaplayıcı</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 40px; max-width: 700px; }
-        input, select { width: 100%; padding: 8px; margin: 6px 0; }
-        button { padding: 10px; width: 100%; cursor: pointer; }
-        .result { margin-top: 20px; font-weight: bold; background: #f2f2f2; padding: 10px; }
-        .chem-img { width: 180px; margin: 15px 0; }
-        .eq-box { background:#eef; padding:10px; border-radius:8px; margin-top:15px; }
-    </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LC-MS/MS QAC Quant</title>
+<meta name="description" content="Calibration, quantification and degradation kinetics for quaternary ammonium compounds from LC-MS/MS peak-area exports.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-<h2>LC-MS/MS Kalibrasyon Hesaplayıcı</h2>
-<p>Kimyasal seç → area gir → regresyon denklemine göre konsantrasyon hesapla.</p>
+<main>
+  <h1>LC-MS/MS quantification for QAC degradation assays</h1>
+  <p class="lede">Turn a peak-area export from the triple quadrupole into calibrated concentrations, % remaining, rate constants and print-ready figures — with every assumption and quality flag visible.</p>
 
-<label>Kimyasal:</label>
-<select id="chem" onchange="updateChem()">
-    <option value="didecyl">Didecyldimethyl ammonium-1</option>
-    <option value="hexpyr">Hexadecylpyridinium-1</option>
-    <option value="hextri">Hexadecyltrimethyl ammonium-1</option>
-    <option value="benz12">Benzyldimethyldodecylammonium-1</option>
-    <option value="benz14">Benzyldimethyltetradecylammonium-1</option>
-    <option value="benz16">Benzyldimethylhexadecylammonium-1</option>
-</select>
+  <div class="grid cols-3">
+    <a class="card link" href="analyzer.html">
+      <h3>Analyze files</h3>
+      <p class="muted small">Drop a calibration export and a sample export. Nothing is uploaded; the calculation runs in this browser.</p>
+    </a>
+    <a class="card link" href="experiments.html">
+      <h3>Experiments</h3>
+      <p class="muted small">Registered experiments with full reports: end-point bars, heatmaps, kinetics, products, QC and tables.</p>
+    </a>
+    <a class="card link" href="calibrations.html">
+      <h3>Calibration curves</h3>
+      <p class="muted small">Weighted fits, back-calculated accuracy, automatic rejection of failing standards, LOD/LOQ and ion ratios.</p>
+    </a>
+  </div>
 
-<div id="chemDisplay"></div>
-
-<label>Area:</label>
-<input type="number" id="area" step="0.0001">
-
-<button onclick="calculate()">Hesapla</button>
-<div class="result" id="output"></div>
-
-<script>
-// --- Regresyon değerleri (örnek, gerçek değerler hesaplanınca buraya yazılacak) ---
-const models = {
-    didecyl: { m: 7453.7, b: 1100, r2: 0.996, img:"https://i.imgur.com/Qx7mYxC.png" },
-    hexpyr:  { m: 2800.4, b: 800,  r2: 0.995, img:"https://i.imgur.com/Bq3N5Zz.png" },
-    hextri:  { m: 2600.2, b: 2100, r2: 0.994, img:"https://i.imgur.com/Z8k4GiC.png" },
-    benz12:  { m: 20000, b: 5500, r2: 0.997, img:"https://i.imgur.com/7oIVB6C.png" },
-    benz14:  { m: 9500,  b: 2000, r2: 0.996, img:"https://i.imgur.com/jv1UcYV.png" },
-    benz16:  { m: 8200,  b: 600,  r2: 0.995, img:"https://i.imgur.com/YsvAZr9.png" }
-};
-
-function updateChem() {
-    const chem = document.getElementById("chem").value;
-    const model = models[chem];
-    document.getElementById("chemDisplay").innerHTML = `
-        <img src="${model.img}" class="chem-img">
-        <div class='eq-box'>
-            <b>Regresyon Denklemi:</b><br>
-            area = ${model.m} × conc + ${model.b}<br><br>
-            <b>R² = ${model.r2}</b>
-        </div>
-    `;
-}
-
-updateChem();
-
-function calculate() {
-    const chem = document.getElementById("chem").value;
-    const area = parseFloat(document.getElementById("area").value);
-    const model = models[chem];
-
-    if (!model || isNaN(area)) {
-        document.getElementById("output").innerHTML = "Lütfen area gir.";
-        return;
-    }
-
-    const conc = (area - model.b) / model.m;
-    document.getElementById("output").innerHTML = `Konsantrasyon: ${conc.toFixed(4)} µg/L`;
-}
+  <h2>What it does</h2>
+  <div class="grid cols-2">
+    <div class="card">
+      <h3>Calculation</h3>
+      <ul class="small">
+        <li>Reads Analyst/SCIEX exports: <span class="mono">Sample Name</span> plus <span class="mono">Compound-1</span> (quantifier) and <span class="mono">-2</span> (qualifier) areas. Misspelt compound names and rows glued by a missing line break are repaired and reported.</li>
+        <li>Internal-standard ratio calibration, 1/x² weighted, with ±15 % / ±20 % (LLOQ) acceptance and automatic exclusion of failing standards.</li>
+        <li>Several calibrations per experiment: each analyte takes the first curve where it actually responds.</li>
+        <li>Sample names such as <span class="mono">sap_c12_t24_r1</span>, <span class="mono">C8B_d1_1</span> or <span class="mono">T14_20m_2</span> are parsed into condition, substrate, time and replicate.</li>
+        <li>Relative mode (% of t₀) when no matching internal standard was spiked.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Quality control</h3>
+      <ul class="small">
+        <li>Internal standard drift across the run, and the IS response of samples versus standards.</li>
+        <li>Flags for missing IS, below LLOQ, above ULOQ, at blank level and off-ratio qualifier ions.</li>
+        <li>Solvent blanks tabulated to expose carry-over.</li>
+        <li>Re-injections handled; single injections can be excluded with a click and exported to the configuration.</li>
+      </ul>
+    </div>
+  </div>
+  <p class="small muted" style="margin-top:20px">See <a href="method.html">Method</a> for equations and acceptance criteria.</p>
+</main>
+<script type="module">
+import { shell } from './js/ui/shell.js';
+shell('index.html');
 </script>
-
 </body>
 </html>

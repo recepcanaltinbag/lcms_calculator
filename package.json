@@ -1,0 +1,11 @@
+{
+  "name": "lcms-calculator",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node tests/run.mjs",
+    "serve": "python3 -m http.server 8000",
+    "demo": "node tools/make_demo.mjs",
+    "summary": "node tests/summary.mjs"
+  }
+}

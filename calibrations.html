@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+<title>Calibration curves</title>
+<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>
+</head>
+<body>
+<main id="root"><p class="muted">Loading…</p></main>
+<script type="module">
+import { shell, loadRegistry, demoBanner, showError } from './js/ui/shell.js';
+import { runCalibration } from './js/engine/index.js';
+import { calibrationSection, esc } from './js/ui/report.js';
+shell('calibrations.html');
+const root = document.getElementById('root');
+try {
+  const reg = await loadRegistry();
+  if (!reg) throw new Error('No registry found.');
+  const only = new URLSearchParams(location.search).get('cal');
+  root.innerHTML = demoBanner(reg.kind) + `<h1>Calibration curves</h1>
+    <p class="lede">Each analyte is fitted as area ratio (analyte / IS) against nominal concentration with 1/x² weighting. Standards whose back-calculated value misses ±15 % (±20 % at the lowest level) are dropped one at a time, never below five levels. Analytes that do not rise with concentration are reported as “not in standards”.</p>`;
+  const list = document.createElement('p');
+  list.className = 'small';
+  list.innerHTML = reg.registry.calibrations.map(c => `<a href="?cal=${c.id}">${esc(c.label)}</a>`).join(' · ') + (only ? ' · <a href="calibrations.html">all</a>' : '');
+  root.appendChild(list);
+  for (const c of reg.registry.calibrations) {
+    if (only && c.id !== only) continue;
+    root.appendChild(calibrationSection(await runCalibration(reg.registry, c.id, reg.readText)));
+  }
+} catch (e) { showError(root, e); }
+</script>
+</body>
+</html>

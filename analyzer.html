@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Analyze files</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>
+<style>
+  .step { display: flex; gap: 10px; align-items: baseline; margin: 32px 0 10px; }
+  .step .n { width: 24px; height: 24px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; flex: none; }
+  .step h2 { margin: 0; }
+  .calrow { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: end; padding: 12px 0; border-top: 1px solid var(--border); }
+  .calrow:first-child { border-top: 0; }
+  .calrow .name { flex: 1 1 220px; min-width: 0; }
+  .calrow .name b { word-break: break-all; }
+  textarea { font: inherit; font-family: var(--mono); font-size: 13px; width: 100%; min-height: 54px; border: 1px solid var(--border); border-radius: 7px; padding: 6px 8px; background: var(--surface-1); color: var(--text-primary); }
+  .field.wide { flex: 1 1 280px; }
+  tr.unparsed td { color: var(--bad); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Analyze files</h1>
+  <p class="lede">Drop instrument exports (tab-separated, one row per injection, <span class="mono">Sample Name</span> + <span class="mono">Compound-1/-2</span> area columns). Everything is computed locally in this browser.</p>
+
+  <div class="step"><span class="n">1</span><h2>Calibration standards</h2></div>
+  <p class="muted small">One or more files. The concentration (µM) is read from the first number in each sample name, e.g. <span class="mono">0.025_uM_QACs</span>. Leave empty for relative (% of t₀) analysis.</p>
+  <label class="drop" id="calDrop"><input type="file" id="calInput" multiple accept=".txt,.tsv,.csv" hidden>Drop calibration file(s) here or click to choose<div class="files"></div></label>
+  <div class="card" id="calList" hidden></div>
+
+  <div class="step"><span class="n">2</span><h2>Samples</h2></div>
+  <label class="drop" id="smpDrop"><input type="file" id="smpInput" accept=".txt,.tsv,.csv" hidden>Drop the sample file here or click to choose<div class="files"></div></label>
+
+  <div class="card" id="smpSettings" hidden style="margin-top:12px">
+    <div class="toolbar" style="margin:0">
+      <label class="field"><span>Dilution factor</span><input type="number" id="dilution" value="1" step="any" min="0"></label>
+      <label class="field"><span>IS in samples (µM)</span><input type="number" id="isConcSample" step="any" min="0" placeholder="= standards"></label>
+      <label class="field"><span>Quantification</span><select id="mode"><option value="absolute">calibrated (µM)</option><option value="relative">relative (% of t₀)</option></select></label>
+      <label class="field" id="relIsField" hidden><span>Surrogate IS (relative)</span><select id="relIs"></select></label>
+      <label class="field"><span>Bare time numbers are</span><select id="bareUnit"><option value="h">hours</option><option value="min">minutes</option><option value="d">days</option></select></label>
+      <label class="field"><span>Show time in</span><select id="displayUnit"><option value="auto">auto</option><option value="min">minutes</option><option value="h">hours</option><option value="d">days</option></select></label>
+      <label class="field"><span>Initial conc. (µM, optional)</span><input type="number" id="c0" step="any" min="0"></label>
+    </div>
+    <div class="toolbar">
+      <label class="field wide"><span>Condition codes (token = label), e.g. <span class="mono">qxya=QxyA, sap=SapB</span></span><textarea id="conditions"></textarea></label>
+      <label class="field wide"><span>Extra substrate codes (token = compound id), e.g. <span class="mono">dd=C12-12DMA</span></span><textarea id="groups"></textarea></label>
+      <label class="field wide"><span>Token order (optional), e.g. <span class="mono">group, condition, rep, time</span></span><textarea id="order" placeholder="auto"></textarea></label>
+    </div>
+    <details class="section" open><summary>How the sample names are read</summary><div id="namePreview" style="margin-top:8px"></div></details>
+  </div>
+
+  <div style="margin:24px 0"><button class="btn primary" id="runBtn" disabled>Analyze</button>
+    <button class="btn" id="cfgBtn" disabled title="Registry entry for local/experiments.json">Download registry entry</button></div>
+
+  <div id="report"></div>
+</main>
+<script type="module">
+import { shell } from './js/ui/shell.js';
+import { parseExport, buildCalibration, parseSampleName, chemicalsIn, plainLabel, CHEMICALS, EXP_DEFAULTS, isBlank } from './js/engine/index.js';
+import { renderExperiment, esc, table } from './js/ui/report.js';
+shell('analyzer.html');
+
+const $ = id => document.getElementById(id);
+const files = new Map();     // name → text
+const cals = [];             // { name, parsed, is, isConc }
+let sample = null;           // { name, parsed }
+
+function wireDrop(dropId, inputId, onFiles) {
+  const drop = $(dropId), input = $(inputId);
+  drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+  drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('over'); onFiles([...e.dataTransfer.files]); });
+  input.addEventListener('change', () => onFiles([...input.files]));
+}
+const readFile = f => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsText(f); });
+
+function guessIS(parsed) {
+  const ids = chemicalsIn(parsed);
+  if (ids.includes('d3MTP')) {
+    const v = parsed.rows.map(r => r.areas['d3MTP|1']).filter(x => x > 0);
+    const med = v.sort((a, b) => a - b)[v.length >> 1] || 0;
+    if (med > 1e5) return 'd3MTP';
+  }
+  return '';
+}
+
+wireDrop('calDrop', 'calInput', async list => {
+  for (const f of list) {
+    try {
+      const text = await readFile(f);
+      const parsed = parseExport(text, f.name);
+      files.set(f.name, text);
+      cals.push({ name: f.name, parsed, is: guessIS(parsed), isConc: 0.022 });
+    } catch (e) { alert(`${f.name}: ${e.message}`); }
+  }
+  renderCals(); update();
+});
+
+wireDrop('smpDrop', 'smpInput', async list => {
+  const f = list[0]; if (!f) return;
+  try {
+    const text = await readFile(f);
+    sample = { name: f.name, parsed: parseExport(text, f.name) };
+    files.set(f.name, text);
+    $('smpDrop').querySelector('.files').textContent = `${f.name} · ${sample.parsed.rows.length} injections`;
+    $('smpSettings').hidden = false;
+    const ids = chemicalsIn(sample.parsed);
+    $('relIs').innerHTML = '<option value="">none (raw area)</option>' + ids.map(id => `<option value="${id}">${esc(plainLabel(id))}</option>`).join('');
+    if (!sample.parsed.rows.some(r => /_\d+m_|_\d+min_/i.test(r.name)) && sample.parsed.rows.some(r => /_\d+_\d+$/.test(r.name))) $('bareUnit').value = 'min';
+  } catch (e) { alert(`${f.name}: ${e.message}`); }
+  update();
+});
+
+function renderCals() {
+  const box = $('calList');
+  box.hidden = !cals.length;
+  $('calDrop').querySelector('.files').textContent = cals.map(c => c.name).join(', ');
+  box.innerHTML = '';
+  cals.forEach((c, i) => {
+    const ids = chemicalsIn(c.parsed);
+    const cal = buildCalibration(c.parsed, { is: c.is || null, isConc: c.isConc });
+    const ok = Object.values(cal.curves).filter(v => v.status === 'ok').map(v => plainLabel(v.chem));
+    const row = document.createElement('div');
+    row.className = 'calrow';
+    row.innerHTML = `<div class="name"><b>${esc(c.name)}</b><div class="muted small">${c.parsed.rows.length} injections · responding: ${ok.length ? esc(ok.join(', ')) : '<span style="color:var(--bad)">none</span>'}</div>
+        ${c.parsed.warnings.length ? `<div class="small" style="color:var(--warn)">${c.parsed.warnings.map(esc).join('<br>')}</div>` : ''}</div>
+      <label class="field"><span>Internal standard</span><select>${['', ...ids].map(id => `<option value="${id}" ${id === c.is ? 'selected' : ''}>${id ? esc(plainLabel(id)) : 'none (external)'}</option>`).join('')}</select></label>
+      <label class="field"><span>IS conc. (µM)</span><input type="number" step="any" min="0" value="${c.isConc}"></label>
+      <button class="btn">Remove</button>`;
+    row.querySelector('select').addEventListener('change', e => { c.is = e.target.value; renderCals(); update(); });
+    row.querySelector('input').addEventListener('change', e => { c.isConc = Number(e.target.value); update(); });
+    row.querySelector('button').addEventListener('click', () => { cals.splice(i, 1); renderCals(); update(); });
+    box.appendChild(row);
+  });
+}
+
+const parseMap = text => Object.fromEntries(text.split(/[,;\n]+/).map(s => s.split(/[=:]/).map(x => x.trim())).filter(p => p.length === 2 && p[0] && p[1]));
+
+function buildRegistry() {
+  const calibrations = cals.map((c, i) => ({ id: `cal${i + 1}`, label: c.name, file: c.name, is: c.is || null, isConc: c.isConc }));
+  const order = $('order').value.trim() ? $('order').value.split(/[,\s]+/).filter(Boolean) : null;
+  const mode = $('mode').value;
+  const exp = {
+    id: 'upload', title: sample.name.replace(/\.(txt|tsv|csv)$/i, ''), file: sample.name,
+    calibrations: mode === 'absolute' ? calibrations.map(c => c.id) : [],
+    dilution: Number($('dilution').value) || 1,
+    isConcSample: $('isConcSample').value === '' ? null : Number($('isConcSample').value),
+    mode, c0: $('c0').value === '' ? null : Number($('c0').value),
+    conditions: parseMap($('conditions').value), groups: parseMap($('groups').value),
+    naming: { order, bareTimeUnit: $('bareUnit').value },
+    rules: mode === 'relative' && $('relIs').value ? [{ where: {}, set: { is: $('relIs').value } }] : [],
+  };
+  // Design and display unit from the parsed names.
+  const parsedNames = sample.parsed.rows.filter(r => !isBlank(r.name)).map(r => parseSampleName(r.name, { ...EXP_DEFAULTS, ...exp }));
+  const times = [...new Set(parsedNames.filter(p => !p.unparsed).map(p => p.time))];
+  exp.design = times.length >= 3 ? 'timecourse' : 'endpoint';
+  const du = $('displayUnit').value;
+  exp.displayTimeUnit = du !== 'auto' ? du : times.every(t => t <= 6) && times.some(t => t % 1) ? 'min' : times.every(t => t % 24 === 0) && Math.max(...times) >= 48 ? 'd' : 'h';
+  return { calibrations, experiments: [exp] };
+}
+
+function renderNamePreview() {
+  if (!sample) return;
+  const reg = buildRegistry();
+  const exp = { ...EXP_DEFAULTS, ...reg.experiments[0] };
+  const seen = new Set();
+  const rows = [];
+  for (const r of sample.parsed.rows) {
+    if (seen.has(r.name)) continue; seen.add(r.name);
+    if (isBlank(r.name)) { rows.push([esc(r.name), '<span class="muted">blank</span>', '', '', '']); continue; }
+    const p = parseSampleName(r.name, exp);
+    rows.push(p.unparsed ? [`<span style="color:var(--bad)">${esc(r.name)}</span>`, '<span style="color:var(--bad)">not understood</span>', '', '', '']
+      : [esc(r.name), esc(p.condition || '—'), plainLabel(p.group), `${+(p.time * 60).toFixed(2)} min · ${+p.time.toFixed(3)} h`, p.rep]);
+  }
+  const bad = rows.filter(r => r[1].includes('not understood')).length;
+  const el = $('namePreview');
+  el.innerHTML = bad ? `<div class="callout bad">${bad} name(s) not understood. Add their substrate code under “Extra substrate codes” or set the token order.</div>` : '';
+  const t = table(['Sample name', 'Condition', 'Substrate', 'Time', 'Rep'], rows);
+  t.classList.add('table-scroll');
+  el.appendChild(t);
+}
+
+function update() {
+  const ready = !!sample && (cals.length > 0 || $('mode').value === 'relative');
+  $('runBtn').disabled = !ready;
+  $('cfgBtn').disabled = !sample;
+  $('relIsField').hidden = $('mode').value !== 'relative';
+  renderNamePreview();
+}
+['dilution', 'isConcSample', 'mode', 'relIs', 'bareUnit', 'displayUnit', 'c0', 'conditions', 'groups', 'order'].forEach(id => $(id).addEventListener('change', update));
+
+$('runBtn').addEventListener('click', async () => {
+  const registry = buildRegistry();
+  const holder = $('report');
+  holder.innerHTML = '';
+  try {
+    try { localStorage.removeItem('lcms:upload:upload'); } catch { /* ignore */ }
+    await renderExperiment(holder, { registry, expId: 'upload', readText: async p => files.get(p), source: 'upload' });
+    holder.scrollIntoView({ behavior: 'smooth' });
+  } catch (e) { holder.innerHTML = `<div class="callout bad">${esc(e.message)}</div>`; console.error(e); }
+});
+
+$('cfgBtn').addEventListener('click', () => {
+  const reg = buildRegistry();
+  reg.calibrations.forEach(c => c.file = `data/${c.file}`);
+  reg.experiments.forEach(e => e.file = `data/${e.file}`);
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(reg, null, 2)], { type: 'application/json' }));
+  a.download = 'experiment-entry.json'; a.click();
+});
+</script>
+</body>
+</html>
