@@ -3,55 +3,38 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LC-MS/MS QAC Quant</title>
-<meta name="description" content="Calibration, quantification and degradation kinetics for quaternary ammonium compounds from LC-MS/MS peak-area exports.">
+<title>QAC Quant</title>
+<meta name="description" content="Calibration, quantification, quality checks and degradation kinetics for quaternary ammonium compounds from LC-MS/MS peak-area exports.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 <main>
-  <h1>LC-MS/MS quantification for QAC degradation assays</h1>
-  <p class="lede">Turn a peak-area export from the triple quadrupole into calibrated concentrations, % remaining, rate constants and print-ready figures — with every assumption and quality flag visible.</p>
+  <section class="hero">
+    <h1>From LC-MS/MS peak areas to publication figures, with every check visible</h1>
+    <p class="lede">Calibrate, quantify and quality-check QAC degradation assays — end-point or time course — straight from the instrument export. Nothing is uploaded; it all runs in your browser.</p>
+    <div class="cta">
+      <a class="btn primary" href="analyzer.html">Analyze your files →</a>
+      <a class="btn" href="experiments.html">Open example reports</a>
+      <a class="btn" href="calibrations.html">Check a calibration</a>
+    </div>
+  </section>
 
+  <div class="steps">
+    <div class="card"><h3>Drop the exports</h3><p class="muted small">Calibration standards and samples as exported (<span class="mono">Sample Name</span> + <span class="mono">Compound-1/-2</span> areas). Misspelt compounds and broken rows are repaired and reported.</p></div>
+    <div class="card"><h3>Confirm the design</h3><p class="muted small">Names like <span class="mono">sap_c12_t24_r1</span>, <span class="mono">C8B_d1_1</span> or <span class="mono">T14_20m_2</span> become condition, substrate, time and replicate — shown in a table before anything is calculated.</p></div>
+    <div class="card"><h3>Review the checks</h3><p class="muted small">Swapped labels, failed injections, replicate outliers, carry-over, dilution mistakes and weak calibrations are listed with the samples involved. Exclude with one click.</p></div>
+    <div class="card"><h3>Export figures</h3><p class="muted small">Prism-style bars, % degraded kinetics with first-order fits, heatmaps and tables — SVG or 600 dpi PNG at journal column width.</p></div>
+  </div>
+
+  <h2>What is calculated</h2>
   <div class="grid cols-3">
-    <a class="card link" href="analyzer.html">
-      <h3>Analyze files</h3>
-      <p class="muted small">Drop a calibration export and a sample export. Nothing is uploaded; the calculation runs in this browser.</p>
-    </a>
-    <a class="card link" href="experiments.html">
-      <h3>Experiments</h3>
-      <p class="muted small">Registered experiments with full reports: end-point bars, heatmaps, kinetics, products, QC and tables.</p>
-    </a>
-    <a class="card link" href="calibrations.html">
-      <h3>Calibration curves</h3>
-      <p class="muted small">Weighted fits, back-calculated accuracy, automatic rejection of failing standards, LOD/LOQ and ion ratios.</p>
-    </a>
+    <div class="card"><div class="feature-icon">📈</div><h3>Calibration</h3><p class="muted small">Analyte/IS area ratio vs concentration, 1/x² weighted. Standards outside ±15 % (±20 % at LLOQ) are dropped one at a time; LOD/LOQ, ion ratios and the working range are reported.</p></div>
+    <div class="card"><div class="feature-icon">🧪</div><h3>Quantification</h3><p class="muted small">Several calibrations per run — each analyte takes the curve it was actually spiked in. Dilution and IS amount are explicit. Relative mode (% of t₀) when no IS matches.</p></div>
+    <div class="card"><div class="feature-icon">⏱</div><h3>Kinetics & statistics</h3><p class="muted small">Mean ± SD/SEM, % remaining per replicate, Welch's t-test for 0 vs 24 h, first-order k with 95 % CI and t½, rate vs chain length.</p></div>
   </div>
-
-  <h2>What it does</h2>
-  <div class="grid cols-2">
-    <div class="card">
-      <h3>Calculation</h3>
-      <ul class="small">
-        <li>Reads Analyst/SCIEX exports: <span class="mono">Sample Name</span> plus <span class="mono">Compound-1</span> (quantifier) and <span class="mono">-2</span> (qualifier) areas. Misspelt compound names and rows glued by a missing line break are repaired and reported.</li>
-        <li>Internal-standard ratio calibration, 1/x² weighted, with ±15 % / ±20 % (LLOQ) acceptance and automatic exclusion of failing standards.</li>
-        <li>Several calibrations per experiment: each analyte takes the first curve where it actually responds.</li>
-        <li>Sample names such as <span class="mono">sap_c12_t24_r1</span>, <span class="mono">C8B_d1_1</span> or <span class="mono">T14_20m_2</span> are parsed into condition, substrate, time and replicate.</li>
-        <li>Relative mode (% of t₀) when no matching internal standard was spiked.</li>
-      </ul>
-    </div>
-    <div class="card">
-      <h3>Quality control</h3>
-      <ul class="small">
-        <li>Internal standard drift across the run, and the IS response of samples versus standards.</li>
-        <li>Flags for missing IS, below LLOQ, above ULOQ, at blank level and off-ratio qualifier ions.</li>
-        <li>Solvent blanks tabulated to expose carry-over.</li>
-        <li>Re-injections handled; single injections can be excluded with a click and exported to the configuration.</li>
-      </ul>
-    </div>
-  </div>
-  <p class="small muted" style="margin-top:20px">See <a href="method.html">Method</a> for equations and acceptance criteria.</p>
+  <p class="small muted" style="margin-top:20px">Equations and acceptance criteria: <a href="method.html">Method</a>.</p>
 </main>
 <script type="module">
 import { shell } from './js/ui/shell.js';

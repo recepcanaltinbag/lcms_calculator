@@ -13,7 +13,7 @@ export function shell(active) {
   if (saved) document.documentElement.dataset.theme = saved;
   const header = document.createElement('header');
   header.className = 'top';
-  header.innerHTML = `<a class="brand" href="index.html">LC-MS/MS QAC Quant</a>
+  header.innerHTML = `<a class="brand" href="index.html"><span class="logo">Q</span>QAC Quant</a>
     <nav>${PAGES.map(([href, t]) => `<a href="${href}" class="${href === active ? 'active' : ''}">${t}</a>`).join('')}</nav>
     <span class="spacer"></span><button class="theme-toggle" type="button">Theme</button>`;
   document.body.prepend(header);

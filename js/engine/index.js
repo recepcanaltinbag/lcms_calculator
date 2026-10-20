@@ -8,6 +8,7 @@ export * from './calibration.js';
 export * from './quant.js';
 export * from './chemicals.js';
 export * from './stats.js';
+export * from './audit.js';
 
 // Run one experiment from a registry ({ calibrations, experiments }).
 // readText(path) returns the file contents (fetch in the browser, fs in Node).

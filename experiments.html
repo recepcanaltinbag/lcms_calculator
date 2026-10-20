@@ -12,6 +12,7 @@
 <main id="root"><p class="muted">Loading…</p></main>
 <script type="module">
 import { shell, loadRegistry, demoBanner, showError } from './js/ui/shell.js';
+import { runExperiment, audit } from './js/engine/index.js';
 import { esc } from './js/ui/report.js';
 shell('experiments.html');
 const root = document.getElementById('root');
@@ -21,14 +22,25 @@ try {
   const { experiments, calibrations } = reg.registry;
   const calLabel = id => calibrations.find(c => c.id === id)?.label || id;
   root.innerHTML = demoBanner(reg.kind) + `<h1>Experiments</h1>
-    <p class="lede">${experiments.length} experiments in <span class="mono">${reg.kind}/experiments.json</span>. Each report recalculates from the raw instrument export every time it opens, so editing the registry or the parameters on the page updates every number and figure.</p>
+    <p class="lede">${experiments.length} experiment${experiments.length === 1 ? '' : 's'}. Each report is recalculated from the raw export when it opens; the dot shows what the automatic checks found.</p>
     <div class="grid cols-2">${experiments.map(e => `
-      <a class="card link" href="report.html?exp=${encodeURIComponent(e.id)}">
+      <a class="card link exp-card" href="report.html?exp=${encodeURIComponent(e.id)}" data-id="${esc(e.id)}">
         <div class="muted small">${e.design === 'timecourse' ? 'Time course' : 'End-point'} · <span class="mono">${esc(e.file.split('/').pop())}</span></div>
-        <h3 style="margin-top:4px">${esc(e.title)}</h3>
+        <h3 style="margin:4px 0 8px">${esc(e.title)}</h3>
         <div class="small">${e.mode === 'relative' ? '<span class="badge warn">relative (% of t₀)</span>' : (e.calibrations || []).map(c => `<span class="badge">${esc(calLabel(c))}</span>`).join(' ')}
         ${(e.assumed || []).length ? '<span class="badge warn">parameters to confirm</span>' : ''}</div>
+        <div class="check-line small muted" style="margin-top:10px">Checking…</div>
       </a>`).join('')}</div>`;
+  for (const e of experiments) {
+    const line = root.querySelector(`.exp-card[data-id="${CSS.escape(e.id)}"] .check-line`);
+    try {
+      const f = audit(await runExperiment(reg.registry, e.id, reg.readText));
+      const nE = f.filter(x => x.severity === 'error').length, nW = f.filter(x => x.severity === 'warn').length;
+      line.innerHTML = nE || nW
+        ? `<span class="badge ${nE ? 'bad' : 'warn'}">${nE ? `${nE} error${nE > 1 ? 's' : ''}` : ''}${nE && nW ? ' · ' : ''}${nW ? `${nW} to check` : ''}</span>`
+        : '<span class="badge good">no problems found</span>';
+    } catch (err) { line.innerHTML = `<span class="badge bad">${esc(err.message)}</span>`; }
+  }
 } catch (e) { showError(root, e); }
 </script>
 </body>

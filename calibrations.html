@@ -3,35 +3,114 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Calibration</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css">
-<title>Calibration curves</title>
 <script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>
 </head>
 <body>
-<main id="root"><p class="muted">Loading…</p></main>
+<main>
+  <h1>Calibration</h1>
+  <p class="lede">Drop a calibration export to see each curve, the back-calculated accuracy of every standard and the working range — then convert sample peak areas to concentrations below.</p>
+
+  <label class="drop" id="drop"><input type="file" id="input" accept=".txt,.tsv,.csv" multiple hidden>
+    <b>Drop calibration file(s)</b> or click to choose<div class="muted small">Concentration (µM) is read from the first number in each sample name, e.g. <span class="mono">0.025_uM_QACs</span></div><div class="files"></div></label>
+
+  <div class="card" id="opts" hidden style="margin-top:12px">
+    <div class="toolbar" style="margin:0">
+      <label class="field"><span>Internal standard</span><select id="is"></select></label>
+      <label class="field"><span>IS in standards (µM)</span><input type="number" id="isConc" value="0.022" step="any" min="0"></label>
+      <label class="field"><span>Weighting</span><select id="weighting"><option value="1/x2">1/x²</option><option value="1/x">1/x</option><option value="none">none</option></select></label>
+      <label class="field"><span>Intercept</span><select id="origin"><option value="false">fitted</option><option value="true">through 0</option></select></label>
+      <label class="field"><span>Failing standards</span><select id="auto"><option value="true">auto-exclude</option><option value="false">keep all</option></select></label>
+    </div>
+  </div>
+
+  <section id="calc" hidden>
+    <h2>Area → concentration</h2>
+    <div class="card">
+      <div class="calc-box">
+        <label class="field"><span>Analyte</span><select id="cAn"></select></label>
+        <label class="field"><span>Analyte peak area</span><input type="number" id="cA" step="any" min="0"></label>
+        <label class="field" id="cIsF"><span>IS peak area</span><input type="number" id="cIs" step="any" min="0"></label>
+        <label class="field" id="cIsCF"><span>IS in sample (µM)</span><input type="number" id="cIsC" step="any" min="0" placeholder="= standards"></label>
+        <label class="field"><span>Dilution factor</span><input type="number" id="cD" value="1" step="any" min="0"></label>
+        <div><div class="muted small">Result</div><div class="calc-out" id="cOut">—</div><div class="small" id="cNote"></div></div>
+      </div>
+    </div>
+  </section>
+
+  <div id="results"></div>
+  <div id="registered"></div>
+</main>
 <script type="module">
-import { shell, loadRegistry, demoBanner, showError } from './js/ui/shell.js';
-import { runCalibration } from './js/engine/index.js';
+import { shell, loadRegistry } from './js/ui/shell.js';
+import { parseExport, buildCalibration, chemicalsIn, plainLabel, invert, runCalibration } from './js/engine/index.js';
 import { calibrationSection, esc } from './js/ui/report.js';
 shell('calibrations.html');
-const root = document.getElementById('root');
-try {
-  const reg = await loadRegistry();
-  if (!reg) throw new Error('No registry found.');
-  const only = new URLSearchParams(location.search).get('cal');
-  root.innerHTML = demoBanner(reg.kind) + `<h1>Calibration curves</h1>
-    <p class="lede">Each analyte is fitted as area ratio (analyte / IS) against nominal concentration with 1/x² weighting. Standards whose back-calculated value misses ±15 % (±20 % at the lowest level) are dropped one at a time, never below five levels. Analytes that do not rise with concentration are reported as “not in standards”.</p>`;
-  const list = document.createElement('p');
-  list.className = 'small';
-  list.innerHTML = reg.registry.calibrations.map(c => `<a href="?cal=${c.id}">${esc(c.label)}</a>`).join(' · ') + (only ? ' · <a href="calibrations.html">all</a>' : '');
-  root.appendChild(list);
-  for (const c of reg.registry.calibrations) {
-    if (only && c.id !== only) continue;
-    root.appendChild(calibrationSection(await runCalibration(reg.registry, c.id, reg.readText)));
+const $ = id => document.getElementById(id);
+let files = [];       // { name, parsed }
+let cals = [];
+
+const readFile = f => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsText(f); });
+async function add(list) {
+  for (const f of list) {
+    try { files.push({ name: f.name, parsed: parseExport(await readFile(f), f.name) }); }
+    catch (e) { alert(`${f.name}: ${e.message}`); }
   }
-} catch (e) { showError(root, e); }
+  const ids = [...new Set(files.flatMap(x => chemicalsIn(x.parsed)))];
+  const prev = $('is').value;
+  $('is').innerHTML = '<option value="">none (external)</option>' + ids.map(id => `<option value="${id}">${esc(plainLabel(id))}</option>`).join('');
+  $('is').value = prev || (ids.includes('d3MTP') ? 'd3MTP' : '');
+  $('opts').hidden = false;
+  $('drop').querySelector('.files').textContent = files.map(x => x.name).join(', ');
+  render();
+}
+const drop = $('drop');
+drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('over'); add([...e.dataTransfer.files]); });
+$('input').addEventListener('change', () => add([...$('input').files]));
+['is', 'isConc', 'weighting', 'origin', 'auto'].forEach(id => $(id).addEventListener('change', render));
+
+function render() {
+  const cfg = { is: $('is').value || null, isConc: Number($('isConc').value) || 1, weighting: $('weighting').value, origin: $('origin').value === 'true', autoExclude: $('auto').value === 'true' };
+  cals = files.map((f, i) => buildCalibration(f.parsed, { ...cfg, id: `u${i}`, label: f.name }));
+  const out = $('results'); out.innerHTML = '';
+  cals.forEach(c => out.appendChild(calibrationSection(c)));
+  const ok = cals.flatMap(c => Object.values(c.curves).filter(v => v.status === 'ok').map(v => ({ cal: c, curve: v })));
+  $('calc').hidden = !ok.length;
+  $('cAn').innerHTML = ok.map((o, i) => `<option value="${i}">${esc(plainLabel(o.curve.chem))}${cals.length > 1 ? ` — ${esc(o.cal.label)}` : ''}</option>`).join('');
+  $('cAn')._ok = ok;
+  $('cIsF').hidden = $('cIsCF').hidden = !cfg.is;
+  calc();
+}
+function calc() {
+  const ok = $('cAn')._ok || [], o = ok[Number($('cAn').value)];
+  if (!o) return;
+  const a = Number($('cA').value), isA = Number($('cIs').value), useIS = !!o.cal.config.is;
+  if (!(a > 0) || (useIS && !(isA > 0))) { $('cOut').textContent = '—'; $('cNote').textContent = 'Enter the peak area' + (useIS ? 's' : '') + '.'; return; }
+  const y = useIS ? a / isA : a;
+  const scale = useIS && $('cIsC').value !== '' ? Number($('cIsC').value) / o.cal.config.isConc : 1;
+  const vial = invert(o.curve, y) * scale, d = Number($('cD').value) || 1;
+  if (vial <= 0) { $('cOut').textContent = '0 µM'; $('cNote').innerHTML = `<span style="color:var(--warn)">Response ratio ${y.toPrecision(3)} is below the curve intercept (${o.curve.fit.intercept.toPrecision(3)}): not distinguishable from zero.</span>`; return; }
+  $('cOut').textContent = `${(vial * d).toPrecision(4)} µM`;
+  const notes = [`${vial.toPrecision(4)} µM in the vial × ${d}`];
+  if (vial < o.curve.lloq) notes.push(`<span style="color:var(--warn)">below LLOQ (${o.curve.lloq} µM)</span>`);
+  if (vial > o.curve.uloq * 1.15) notes.push(`<span style="color:var(--warn)">above ULOQ (${o.curve.uloq} µM) — dilute and re-inject</span>`);
+  $('cNote').innerHTML = notes.join(' · ');
+}
+['cAn', 'cA', 'cIs', 'cIsC', 'cD'].forEach(id => $(id).addEventListener('input', calc));
+
+// Registered calibrations only when a local registry is served (never the demo).
+const reg = await loadRegistry();
+if (reg?.kind === 'local') {
+  const box = $('registered');
+  box.appendChild(Object.assign(document.createElement('h2'), { textContent: 'Registered calibrations' }));
+  box.appendChild(Object.assign(document.createElement('p'), { className: 'muted small', innerHTML: 'From <span class="mono">local/experiments.json</span>. Curves are collapsed — open one to inspect it.' }));
+  for (const c of reg.registry.calibrations) box.appendChild(calibrationSection(await runCalibration(reg.registry, c.id, reg.readText), null, { open: false }));
+}
 </script>
 </body>
 </html>

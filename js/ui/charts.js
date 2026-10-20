@@ -121,57 +121,110 @@ export function accuracyFigure(curve, cfg) {
   };
 }
 
-// ── Endpoint (t0 vs t-end) bars with replicate dots ───────────────────────
+// ── Figure style ──────────────────────────────────────────────────────────
+// Options the viewer can change; shared by end-point and kinetics figures.
+export const FIG_DEFAULTS = {
+  palette: 'prism',     // 'prism' (green/blue, as in the thesis figures) | 'screen' | 'mono'
+  err: 'sd',            // 'sd' | 'sem' | 'none'
+  dots: true,           // replicate dots
+  label: '',            // panel label, e.g. "A: <i>E. coli</i> BL21(DE3) pET::qxyA"
+  notDeg: 50,           // % remaining at the last time point treated as "not degraded" (null = off)
+  kinY: 'deg',          // 'deg' (% degraded) | 'pct' (% remaining) | 'conc'
+  split: true,          // kinetics: separate panels for benzyl and non-benzyl QACs
+  timeFmt: 'hmm',       // 'min' | 'hmm' | 'h'
+  xMax: null,           // kinetics: last time shown (minutes)
+  fit: true,            // kinetics: draw first-order fit
+};
+
+const TIME_COLORS = {
+  prism: ['#6ab46a', '#5b9bd5', '#f4a259', '#9b8ec4'],
+  mono: ['#c4c4c4', '#4a4a4a', '#8a8a8a', '#1f1f1f'],
+};
+const KIN_COLORS = {
+  prism: ['#222222', '#2e6fbd', '#43a047', '#8e44ad', '#e53935', '#f39c12', '#8d6e63', '#9e9e9e'],
+  mono: ['#000000', '#3a3a3a', '#5c5c5c', '#7a7a7a', '#999999', '#b5b5b5', '#2a2a2a', '#6a6a6a'],
+};
+export const SYMBOLS = ['circle', 'square', 'diamond', 'triangle-up', 'triangle-down', 'cross', 'x', 'star', 'hexagon', 'pentagon'];
+export const timeColor = (j, fs) => TIME_COLORS[fs.palette]?.[j % 4] ?? seriesColor(j);
+export const kinColor = (i, fs) => KIN_COLORS[fs.palette]?.[i % 8] ?? seriesColor(i);
+const errOf = (sdv, n, fs) => fs.err === 'none' || !Number.isFinite(sdv) ? 0 : fs.err === 'sem' ? sdv / Math.sqrt(n || 1) : sdv;
+
+function panelLabel(fs, extra = []) {
+  return fs.label ? [{ xref: 'paper', yref: 'paper', x: 0.01, y: 1, xanchor: 'left', yanchor: 'top', text: fs.label, showarrow: false, font: { size: 13, color: css('--text-primary') }, align: 'left' }, ...extra] : extra;
+}
+
+// ── Endpoint bars with replicate dots ─────────────────────────────────────
 // series: substrate (or product) series of one condition, in display order.
-export function endpointFigure(series, { metric = 'conc', unit = 'h', log = false, c0 = null, title = '' } = {}) {
-  const times = [...new Set(series.flatMap(s => s.points.map(p => p.time)))].sort((a, b) => a - b);
+// metric: 'conc' | 'pct' (% of t₀) | 'deg' (% degraded at later times).
+export function endpointFigure(series, { metric = 'conc', unit = 'h', log = false, c0 = null, title = '', fs = FIG_DEFAULTS } = {}) {
+  let times = [...new Set(series.flatMap(s => s.points.map(p => p.time)))].sort((a, b) => a - b);
+  const tEnd = times[times.length - 1];
+  // "Not degraded" substrates move to the right behind a shaded band.
+  let ordered = series, nd = 0;
+  if (fs.notDeg != null && series[0]?.role === 'substrate' && times.length > 1) {
+    const pctEnd = s => s.points.find(p => p.time === tEnd)?.pctMean;
+    const isNd = s => pctEnd(s) >= fs.notDeg;
+    ordered = [...series.filter(s => !isNd(s)), ...series.filter(isNd)];
+    nd = series.filter(isNd).length;
+  }
+  if (metric === 'deg') times = times.slice(1);
   const nT = times.length, bw = Math.min(0.36, 0.8 / nT);
   const off = j => (j - (nT - 1) / 2) * (bw + 0.03);
+  const valOf = r => metric === 'pct' ? r.percent : metric === 'deg' ? (r.percent == null ? null : 100 - r.percent) : r.value;
+  const meanOf = p => metric === 'pct' ? p.pctMean : metric === 'deg' ? 100 - p.pctMean : p.mean;
+  const sdOf = p => metric === 'conc' ? p.sd : p.pctSd;
+  const unitTxt = metric === 'conc' ? (series[0]?.records.find(r => r.unit)?.unit || '') : '%';
   const data = [];
-  const valOf = r => metric === 'pct' ? r.percent : r.value;
   times.forEach((t, j) => {
     const xs = [], ys = [], err = [], hov = [];
-    series.forEach((s, i) => {
+    ordered.forEach((s, i) => {
       const p = s.points.find(q => q.time === t);
-      if (!p || !p.n) return;
-      xs.push(i + off(j));
-      ys.push(metric === 'pct' ? p.pctMean : p.mean);
-      err.push(metric === 'pct' ? (p.pctSd || 0) : (p.sd || 0));
-      hov.push(`<b>${label(s.analyte)}</b> · ${timeLabel(t, unit)}<br>${fmt(metric === 'pct' ? p.pctMean : p.mean)} ± ${fmt(metric === 'pct' ? p.pctSd : p.sd, 2)} ${metric === 'pct' ? '%' : s.records[0]?.unit || ''} (n = ${p.n})<extra></extra>`);
+      if (!p || !p.n || !Number.isFinite(meanOf(p))) return;
+      xs.push(i + off(j)); ys.push(meanOf(p)); err.push(errOf(sdOf(p), p.n, fs));
+      hov.push(`<b>${label(s.analyte)}</b> · ${timeLabel(t, unit)}<br>${fmt(meanOf(p))} ± ${fmt(sdOf(p), 2)} ${unitTxt} (SD, n = ${p.n})<extra></extra>`);
     });
-    const color = seriesColor(j);
+    const color = metric === 'deg' ? timeColor(1, fs) : timeColor(j, fs);
     data.push({
-      type: 'bar', x: xs, y: ys, width: bw, name: timeLabel(t, unit), marker: { color, line: { width: 0 } },
-      error_y: { type: 'data', array: err, visible: true, color: css('--text-primary'), thickness: 1, width: 3 },
-      hovertemplate: hov, legendgroup: `t${j}`,
+      type: 'bar', x: xs, y: ys, width: bw, name: metric === 'deg' ? `Degraded at ${timeLabel(t, unit)}` : timeLabel(t, unit),
+      marker: { color, line: { width: 0 } }, legendgroup: `t${j}`, hovertemplate: hov,
+      error_y: { type: 'data', array: err, visible: fs.err !== 'none', color: css('--text-primary'), thickness: 1, width: 4 },
     });
-    // Replicate dots, hollow when flagged.
+    if (!fs.dots) return;
     const dx = [], dy = [], dh = [], dfill = [];
-    series.forEach((s, i) => {
+    ordered.forEach((s, i) => {
       const recs = s.records.filter(r => r.time === t && Number.isFinite(valOf(r)));
       recs.forEach((r, k) => {
-        dx.push(i + off(j) + (recs.length > 1 ? (k / (recs.length - 1) - 0.5) * bw * 0.5 : 0));
+        dx.push(i + off(j) + (recs.length > 1 ? (k / (recs.length - 1) - 0.5) * bw * 0.45 : 0));
         dy.push(valOf(r));
-        const flagged = r.excluded || r.flags.length;
-        dfill.push(r.excluded ? 'rgba(0,0,0,0)' : flagged ? css('--surface-1') : css('--text-primary'));
-        dh.push(`${r.name}<br>${fmt(valOf(r))} ${metric === 'pct' ? '%' : r.unit}${r.flags.length ? `<br>⚑ ${r.flags.join(', ')}` : ''}${r.excluded ? `<br>excluded: ${r.reason}` : ''}<extra></extra>`);
+        dfill.push(r.excluded ? 'rgba(0,0,0,0)' : r.flags.length ? css('--surface-1') : css('--text-primary'));
+        dh.push(`${r.name}<br>${fmt(valOf(r))} ${unitTxt}${r.flags.length ? `<br>⚑ ${r.flags.join(', ')}` : ''}${r.excluded ? `<br>excluded: ${r.reason}` : ''}<extra></extra>`);
       });
     });
-    data.push({
-      type: 'scatter', mode: 'markers', x: dx, y: dy, showlegend: false, legendgroup: `t${j}`,
-      marker: { size: 6, color: dfill, line: { color: css('--text-primary'), width: 1 } }, hovertemplate: dh,
-    });
+    data.push({ type: 'scatter', mode: 'markers', x: dx, y: dy, showlegend: false, legendgroup: `t${j}`, marker: { size: 6, color: dfill, line: { color: css('--text-primary'), width: 1 } }, hovertemplate: dh });
   });
-  const shapes = [];
+  const shapes = [], annotations = [];
   if (metric === 'conc' && c0) shapes.push({ type: 'line', xref: 'paper', x0: 0, x1: 1, y0: c0, y1: c0, line: { color: css('--text-muted'), width: 1, dash: 'dash' } });
   if (metric === 'pct') shapes.push({ type: 'line', xref: 'paper', x0: 0, x1: 1, y0: 100, y1: 100, line: { color: css('--text-muted'), width: 1, dash: 'dot' } });
-  const unitLabel = series[0]?.records.find(r => r.unit)?.unit || '';
+  if (nd) {
+    const x0 = ordered.length - nd - 0.5;
+    shapes.push({ type: 'rect', xref: 'x', yref: 'paper', x0, x1: ordered.length - 0.4, y0: 0, y1: 1, fillcolor: css('--bad'), opacity: 0.06, line: { width: 0 }, layer: 'below' });
+    shapes.push({ type: 'line', xref: 'x', yref: 'paper', x0, x1: x0, y0: 0, y1: 1, line: { color: css('--text-muted'), width: 1, dash: 'dash' } });
+    annotations.push({ xref: 'x', yref: 'paper', x: x0 + 0.08, y: 1, xanchor: 'left', yanchor: 'top', text: '<i>Not degraded</i>', showarrow: false, font: { size: 11, color: css('--bad') } });
+  }
+  const prismLegend = fs.palette !== 'screen'
+    ? { orientation: 'v', x: nd ? Math.max(0, (ordered.length - nd - 0.5 + 0.6) / (ordered.length + 0.2)) - 0.01 : 1, xanchor: 'right', y: 1, yanchor: 'top', bgcolor: css('--surface-1'), bordercolor: css('--border'), borderwidth: 1 }
+    : undefined;
   return {
     data,
     layout: baseLayout({
-      height: 320, barmode: 'overlay', shapes,
-      xaxis: { tickvals: series.map((_, i) => i), ticktext: series.map(s => label(s.analyte)), range: [-0.6, series.length - 0.4], showgrid: false },
-      yaxis: { type: log ? 'log' : 'linear', dtick: log ? 1 : undefined, title: { text: metric === 'pct' ? '% of t₀' : unitLabel === 'µM' ? 'Concentration (µM)' : `Response (${unitLabel})` }, rangemode: 'tozero' },
+      height: 340, barmode: 'overlay', shapes, annotations: panelLabel(fs, annotations),
+      margin: { l: 56, r: 16, t: fs.label ? 34 : 12, b: 56 },
+      ...(prismLegend ? { legend: { ...prismLegend, font: { size: 12, color: css('--text-primary') } } } : {}),
+      xaxis: { tickvals: ordered.map((_, i) => i), ticktext: ordered.map(s => label(s.analyte)), range: [-0.6, ordered.length - 0.4], showgrid: false },
+      yaxis: {
+        type: log ? 'log' : 'linear', dtick: log ? 1 : undefined, rangemode: 'tozero',
+        title: { text: metric === 'pct' ? '% of t₀ remaining' : metric === 'deg' ? '% substrate degraded' : unitTxt === 'µM' ? 'Concentration (µM)' : `Response (${unitTxt})` },
+      },
       title: title ? { text: title, x: 0, font: { size: 13 } } : undefined,
     }),
   };
@@ -243,21 +296,51 @@ export function timecourseFigure(s, { unit = 'min', metric = 'pct', log = false,
   };
 }
 
-export function overlayFigure(seriesList, { unit = 'min', log = false } = {}) {
-  const data = seriesList.map((s, i) => {
-    const pts = s.points.filter(p => p.n && Number.isFinite(p.pctMean));
-    return {
-      x: pts.map(p => toUnit(p.time, unit)), y: pts.map(p => p.pctMean), mode: 'lines+markers', name: label(s.group),
-      line: { color: seriesColor(i), width: 2 }, marker: { size: 8, color: seriesColor(i), line: { color: css('--surface-1'), width: 2 } },
-      hovertemplate: pts.map(p => `<b>${label(s.group)}</b> · ${timeLabel(p.time, unit)}<br>${fmt(p.pctMean)} % ± ${fmt(p.pctSd, 2)}<extra></extra>`),
-    };
+// Kinetics overlay: one line per substrate, distinct marker shapes, optional
+// first-order fit drawn through the points.
+export function hmm(minutes) {
+  const m = Math.round(minutes);
+  return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`;
+}
+export function overlayFigure(seriesList, { unit = 'min', log = false, fs = FIG_DEFAULTS, title = '' } = {}) {
+  const tUnit = fs.timeFmt === 'h' ? 'h' : 'min';
+  const xOf = t => toUnit(t, tUnit);
+  const xMaxH = fs.xMax ? fs.xMax / 60 : Infinity;
+  const yOf = (s, p) => fs.kinY === 'conc' ? p.mean : fs.kinY === 'deg' ? 100 - p.pctMean : p.pctMean;
+  const data = [];
+  seriesList.forEach((s, i) => {
+    const color = kinColor(i, fs), symbol = SYMBOLS[i % SYMBOLS.length];
+    const pts = s.points.filter(p => p.n && p.time <= xMaxH + 1e-9 && Number.isFinite(yOf(s, p)));
+    const sdv = p => fs.kinY === 'conc' ? p.sd : p.pctSd;
+    data.push({
+      x: pts.map(p => xOf(p.time)), y: pts.map(p => yOf(s, p)), mode: fs.fit && s.kinetics ? 'markers' : 'lines+markers', name: label(s.group),
+      line: { color, width: 1.5 }, legendgroup: s.group,
+      marker: { size: 9, color, symbol, line: { color: css('--surface-1'), width: 1 } },
+      error_y: { type: 'data', array: pts.map(p => errOf(sdv(p), p.n, fs)), visible: fs.err !== 'none', color, thickness: 1, width: 3 },
+      hovertemplate: pts.map(p => `<b>${label(s.group)}</b> · ${fs.timeFmt === 'hmm' ? hmm(p.time * 60) : timeLabel(p.time, tUnit)}<br>${fmt(yOf(s, p))} ${fs.kinY === 'conc' ? 'µM' : '%'} ± ${fmt(sdv(p), 2)} (n = ${p.n})<extra></extra>`),
+    });
+    if (fs.fit && s.kinetics && s.kinetics.k > 0) {
+      const tmax = Math.min(Math.max(...s.points.map(p => p.time)), xMaxH);
+      const ts = Array.from({ length: 60 }, (_, q) => tmax * q / 59);
+      const t0m = s.points[0].mean || 1;
+      const c = t => s.kinetics.c0 * Math.exp(-s.kinetics.k * t);
+      const y = t => fs.kinY === 'conc' ? c(t) : fs.kinY === 'deg' ? 100 - 100 * c(t) / t0m : 100 * c(t) / t0m;
+      data.push({ x: ts.map(xOf), y: ts.map(y), mode: 'lines', showlegend: false, legendgroup: s.group, hoverinfo: 'skip', line: { color, width: 2 }, opacity: 0.55 });
+    }
   });
+  const allT = [...new Set(seriesList.flatMap(s => s.points.map(p => p.time)))].filter(t => t <= xMaxH + 1e-9).sort((a, b) => a - b);
+  const xaxis = { title: { text: fs.timeFmt === 'hmm' ? 'Time (h:mm)' : `Time (${tUnit})` }, rangemode: 'tozero', showgrid: false };
+  if (fs.timeFmt === 'hmm') { xaxis.tickvals = allT.map(xOf); xaxis.ticktext = allT.map(t => hmm(t * 60)); }
   return {
     data,
     layout: baseLayout({
-      height: 360,
-      xaxis: { title: { text: `Time (${unit})` }, rangemode: 'tozero' },
-      yaxis: { type: log ? 'log' : 'linear', dtick: log ? 1 : undefined, title: { text: '% of t₀' }, rangemode: log ? undefined : 'tozero' },
+      height: 380, margin: { l: 58, r: 16, t: title ? 40 : 12, b: 50 },
+      title: title ? { text: title, x: 0.5, font: { size: 14, color: css('--text-secondary') } } : undefined,
+      legend: { orientation: 'v', x: 0.01, xanchor: 'left', y: 1, yanchor: 'top', bgcolor: css('--surface-1'), bordercolor: css('--border'), borderwidth: 1, font: { size: 11, color: css('--text-primary') } },
+      xaxis,
+      yaxis: { type: log ? 'log' : 'linear', dtick: log ? 1 : undefined, rangemode: 'tozero',
+        title: { text: fs.kinY === 'conc' ? 'Concentration (µM)' : fs.kinY === 'deg' ? '% substrate degraded' : '% of t₀ remaining' } },
+      annotations: panelLabel(fs),
     }),
   };
 }
