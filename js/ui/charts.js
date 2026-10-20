@@ -150,7 +150,7 @@ export const kinColor = (i, fs) => KIN_COLORS[fs.palette]?.[i % 8] ?? seriesColo
 const errOf = (sdv, n, fs) => fs.err === 'none' || !Number.isFinite(sdv) ? 0 : fs.err === 'sem' ? sdv / Math.sqrt(n || 1) : sdv;
 
 function panelLabel(fs, extra = []) {
-  return fs.label ? [{ xref: 'paper', yref: 'paper', x: 0.01, y: 1, xanchor: 'left', yanchor: 'top', text: fs.label, showarrow: false, font: { size: 13, color: css('--text-primary') }, align: 'left' }, ...extra] : extra;
+  return fs.label ? [{ xref: 'paper', yref: 'paper', x: 0, y: 1, xanchor: 'left', yanchor: 'bottom', yshift: 26, text: fs.label, showarrow: false, font: { size: 13, color: css('--text-primary') }, align: 'left' }, ...extra] : extra;
 }
 
 // ── Endpoint bars with replicate dots ─────────────────────────────────────
@@ -166,6 +166,7 @@ export function endpointFigure(series, { metric = 'conc', unit = 'h', log = fals
     const isNd = s => pctEnd(s) >= fs.notDeg;
     ordered = [...series.filter(s => !isNd(s)), ...series.filter(isNd)];
     nd = series.filter(isNd).length;
+    if (nd === series.length) { ordered = series; nd = 0; }   // nothing degraded: no band
   }
   if (metric === 'deg') times = times.slice(1);
   const nT = times.length, bw = Math.min(0.36, 0.8 / nT);
@@ -175,12 +176,14 @@ export function endpointFigure(series, { metric = 'conc', unit = 'h', log = fals
   const sdOf = p => metric === 'conc' ? p.sd : p.pctSd;
   const unitTxt = metric === 'conc' ? (series[0]?.records.find(r => r.unit)?.unit || '') : '%';
   const data = [];
+  let top = 0;
   times.forEach((t, j) => {
     const xs = [], ys = [], err = [], hov = [];
     ordered.forEach((s, i) => {
       const p = s.points.find(q => q.time === t);
       if (!p || !p.n || !Number.isFinite(meanOf(p))) return;
       xs.push(i + off(j)); ys.push(meanOf(p)); err.push(errOf(sdOf(p), p.n, fs));
+      top = Math.max(top, meanOf(p) + err[err.length - 1]);
       hov.push(`<b>${label(s.analyte)}</b> · ${timeLabel(t, unit)}<br>${fmt(meanOf(p))} ± ${fmt(sdOf(p), 2)} ${unitTxt} (SD, n = ${p.n})<extra></extra>`);
     });
     const color = metric === 'deg' ? timeColor(1, fs) : timeColor(j, fs);
@@ -196,6 +199,7 @@ export function endpointFigure(series, { metric = 'conc', unit = 'h', log = fals
       recs.forEach((r, k) => {
         dx.push(i + off(j) + (recs.length > 1 ? (k / (recs.length - 1) - 0.5) * bw * 0.45 : 0));
         dy.push(valOf(r));
+        top = Math.max(top, valOf(r));
         dfill.push(r.excluded ? 'rgba(0,0,0,0)' : r.flags.length ? css('--surface-1') : css('--text-primary'));
         dh.push(`${r.name}<br>${fmt(valOf(r))} ${unitTxt}${r.flags.length ? `<br>⚑ ${r.flags.join(', ')}` : ''}${r.excluded ? `<br>excluded: ${r.reason}` : ''}<extra></extra>`);
       });
@@ -211,18 +215,18 @@ export function endpointFigure(series, { metric = 'conc', unit = 'h', log = fals
     shapes.push({ type: 'line', xref: 'x', yref: 'paper', x0, x1: x0, y0: 0, y1: 1, line: { color: css('--text-muted'), width: 1, dash: 'dash' } });
     annotations.push({ xref: 'x', yref: 'paper', x: x0 + 0.08, y: 1, xanchor: 'left', yanchor: 'top', text: '<i>Not degraded</i>', showarrow: false, font: { size: 11, color: css('--bad') } });
   }
-  const prismLegend = fs.palette !== 'screen'
-    ? { orientation: 'v', x: nd ? Math.max(0, (ordered.length - nd - 0.5 + 0.6) / (ordered.length + 0.2)) - 0.01 : 1, xanchor: 'right', y: 1, yanchor: 'top', bgcolor: css('--surface-1'), bordercolor: css('--border'), borderwidth: 1 }
-    : undefined;
+  if (metric === 'conc' && c0) top = Math.max(top, c0);
+  if (metric === 'pct') top = Math.max(top, 100);
   return {
     data,
     layout: baseLayout({
       height: 340, barmode: 'overlay', shapes, annotations: panelLabel(fs, annotations),
-      margin: { l: 56, r: 16, t: fs.label ? 34 : 12, b: 56 },
-      ...(prismLegend ? { legend: { ...prismLegend, font: { size: 12, color: css('--text-primary') } } } : {}),
+      margin: { l: 56, r: 16, t: fs.label ? 58 : 34, b: 56 },
+      legend: { orientation: 'h', x: 1, xanchor: 'right', y: 1, yanchor: 'bottom', font: { size: 12, color: css('--text-primary') } },
       xaxis: { tickvals: ordered.map((_, i) => i), ticktext: ordered.map(s => label(s.analyte)), range: [-0.6, ordered.length - 0.4], showgrid: false },
       yaxis: {
         type: log ? 'log' : 'linear', dtick: log ? 1 : undefined, rangemode: 'tozero',
+        range: !log && top > 0 ? [0, top * (nd ? 1.16 : 1.05)] : undefined,
         title: { text: metric === 'pct' ? '% of t₀ remaining' : metric === 'deg' ? '% substrate degraded' : unitTxt === 'µM' ? 'Concentration (µM)' : `Response (${unitTxt})` },
       },
       title: title ? { text: title, x: 0, font: { size: 13 } } : undefined,
@@ -334,9 +338,9 @@ export function overlayFigure(seriesList, { unit = 'min', log = false, fs = FIG_
   return {
     data,
     layout: baseLayout({
-      height: 380, margin: { l: 58, r: 16, t: title ? 40 : 12, b: 50 },
+      height: 380, margin: { l: 58, r: 10, t: fs.label ? 40 : title ? 40 : 12, b: 50 },
       title: title ? { text: title, x: 0.5, font: { size: 14, color: css('--text-secondary') } } : undefined,
-      legend: { orientation: 'v', x: 0.01, xanchor: 'left', y: 1, yanchor: 'top', bgcolor: css('--surface-1'), bordercolor: css('--border'), borderwidth: 1, font: { size: 11, color: css('--text-primary') } },
+      legend: { orientation: 'v', x: 1.02, xanchor: 'left', y: 1, yanchor: 'top', font: { size: 11, color: css('--text-primary') } },
       xaxis,
       yaxis: { type: log ? 'log' : 'linear', dtick: log ? 1 : undefined, rangemode: 'tozero',
         title: { text: fs.kinY === 'conc' ? 'Concentration (µM)' : fs.kinY === 'deg' ? '% substrate degraded' : '% of t₀ remaining' } },

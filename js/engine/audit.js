@@ -124,6 +124,19 @@ export function audit(run) {
     if (c.ionRatio?.cv > 25) add('info', 'calibration', `${plainLabel(c.chem)} (${cal.label}): qualifier/quantifier ratio varies ${c.ionRatio.cv.toFixed(0)} % between standards — the qualifier transition is weak or interfered.`);
   }
 
+  // 10. Product channel interference: the qualifier/quantifier ratio of a
+  //     product in samples where it cannot have formed yet (t0) differs from
+  //     the standards — a co-eluting matrix compound inflates the baseline.
+  for (const s of result.series.filter(x => x.role === 'product')) {
+    const cal = calibrations.find(c => c.curves[s.analyte]?.ionRatio);
+    const ref = cal?.curves[s.analyte].ionRatio.mean;
+    const r0 = s.records.filter(r => r.time === t0 && r.area > 0 && r.qual > 0).map(r => r.qual / r.area);
+    if (!ref || r0.length < 2) continue;
+    const m = median(r0), dev = 100 * (m / ref - 1);
+    if (Math.abs(dev) > 15 && s.points[0]?.mean > 0)
+      add('warn', 'interference', `${plainLabel(s.analyte)} measured at t₀ in ${s.condition ? s.condition + ' · ' : ''}${plainLabel(s.group)} (${s.points[0].mean.toPrecision(2)} ${s.records[0].unit}) has a qualifier/quantifier ratio of ${m.toFixed(3)} vs ${ref.toFixed(3)} in the standards (${dev > 0 ? '+' : ''}${dev.toFixed(0)} %): mostly a co-eluting matrix compound, not ${plainLabel(s.analyte)}. Report net formation (t − t₀) or subtract a matrix blank.`);
+  }
+
   const order = { error: 0, warn: 1, info: 2 };
   return findings.sort((a, b) => order[a.severity] - order[b.severity]);
 }

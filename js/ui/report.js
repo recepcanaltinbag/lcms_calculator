@@ -32,7 +32,7 @@ const FLAG_INFO = {
 };
 const flagBadge = f => `<span class="badge ${FLAG_INFO[f]?.[0] || ''}" title="${esc(FLAG_INFO[f]?.[1] || '')}">${esc(f)}</span>`;
 const SEV = { error: ['bad', 'Error', '!'], warn: ['warn', 'Check', '?'], info: ['', 'Note', 'i'] };
-const KIND_LABEL = { label: 'Sample label', duplicate: 'Re-injection', injection: 'Failed injection', outlier: 'Replicate outlier', spread: 'Replicate spread', units: 'Units / dilution', range: 'Above range', increase: 'No decrease', carryover: 'Carry-over', 'is-level': 'IS level', calibration: 'Calibration' };
+const KIND_LABEL = { label: 'Sample label', duplicate: 'Re-injection', injection: 'Failed injection', outlier: 'Replicate outlier', spread: 'Replicate spread', units: 'Units / dilution', range: 'Above range', increase: 'No decrease', carryover: 'Carry-over', interference: 'Interference', 'is-level': 'IS level', calibration: 'Calibration' };
 
 export function download(name, text, type = 'text/csv') {
   const a = h('a', { href: URL.createObjectURL(new Blob([text], { type })), download: name });
@@ -315,6 +315,7 @@ export async function renderExperiment(root, { registry, expId, readText, source
       el.appendChild(g2);
     }
 
+    balanceTable(el);
     el.appendChild(h('h2', {}, 'Summary'));
     const rows = substrates.map(s => {
       const a = s.points.find(p => p.time === t0), b = s.points.find(p => p.time === tEnd);
@@ -372,12 +373,23 @@ export async function renderExperiment(root, { registry, expId, readText, source
 
       const prods = r.series.filter(s => s.role === 'product' && s.condition === c);
       if (prods.length) {
+        balanceTable(el, c);
         el.appendChild(h('h2', {}, 'Transformation products'));
         const pg = h('div', { class: 'grid cols-3' });
         mount(pg, prods.map(p => chartCard(`${label(p.analyte)} from ${label(p.group)}`, 'µM formed over time.', timecourseFigure(p, { unit, metric: 'conc', color: kinColor(4, fs) }), { file: `${expId}_${p.analyte}_${p.group}` })));
         el.appendChild(pg);
       }
     }
+  }
+
+  function balanceTable(el, cond) {
+    const rows = run.result.balance.filter(b => cond == null || b.condition === cond);
+    if (!rows.length) return;
+    el.appendChild(h('h2', {}, 'Molar balance'));
+    el.appendChild(h('p', { class: 'muted small' }, `Substrate lost (t₀ − t<sub>end</sub>) vs product formed (t<sub>end</sub> − t₀), in µM. One mole of BDMA is expected per mole of benzyl-QAC cleaved at the alkyl C–N bond. Yields well below 100 % point to sorption of the substrate to biomass, another cleavage route, ion suppression of the early-eluting product, or a calibration that is not linear over the range used.`));
+    el.appendChild(table(['Condition', 'Substrate', 'Product', 'Substrate lost', 'Product formed', 'Product at t₀', 'Molar yield'],
+      rows.map(b => [esc(b.condition), label(b.substrate), label(b.product), fmt(b.lost), fmt(b.formed), fmt(b.p0),
+        b.yield == null ? '—' : `<span class="badge ${b.yield >= 80 && b.yield <= 120 ? 'good' : 'warn'}">${b.yield.toFixed(0)} %</span>`]), [3, 4, 5, 6]));
   }
 
   // ── Checks ──────────────────────────────────────────────────────────────

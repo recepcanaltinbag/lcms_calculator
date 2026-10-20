@@ -245,8 +245,20 @@ export function quantify(parsed, calibrations, config = {}) {
     if (sr.role === 'substrate' && ts.length >= 3) sr.kinetics = fitFirstOrder(used);
   }
 
+  // Molar balance: substrate lost vs product formed (net of t0) per condition.
+  const balance = [];
+  for (const pr of [...series.values()].filter(x => x.role === 'product')) {
+    const sub = series.get(`${pr.condition}|${pr.group}|${pr.group}`);
+    if (!sub || sub.mode !== 'absolute') continue;
+    const s0 = sub.points[0], sE = sub.points[sub.points.length - 1];
+    const p0 = pr.points[0], pE = pr.points[pr.points.length - 1];
+    if (!(s0?.n && sE?.n && p0?.n && pE?.n) || s0.time === sE.time) continue;
+    const lost = s0.mean - sE.mean, formed = pE.mean - p0.mean;
+    balance.push({ condition: pr.condition, substrate: pr.group, product: pr.analyte, time: sE.time, lost, formed, p0: p0.mean, yield: lost > 0.1 * s0.mean ? 100 * formed / lost : null });
+  }
+
   return {
-    config: exp, records, series: [...series.values()], times, notes,
+    config: exp, records, series: [...series.values()], times, notes, balance,
     blanks: blanks.map(b => ({ row: b.index, name: b.name, areas: b.areas })),
     runIS: Object.entries(runIS).map(([id, med]) => ({ id, median: med, rows: [...isRows[id].keys()] })),
     injections: rows.map(r => ({ row: r.index, name: r.name, blank: isBlank(r.name), areas: r.areas })),
